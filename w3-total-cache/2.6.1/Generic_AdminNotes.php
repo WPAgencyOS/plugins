@@ -135,7 +135,9 @@ class Generic_AdminNotes {
 
 		if ( $state_master->get_boolean( 'common.show_note.nginx_restart_required' ) ) {
 			$cf = Dispatcher::component( 'CacheFlush' );
-
+      
+      /*
+			invokers waas1 edit start
 			$notes['nginx_restart_required'] = wp_kses(
 				sprintf(
 					// translators: 1: HTML input button to hide message.
@@ -161,6 +163,8 @@ class Generic_AdminNotes {
 					),
 				)
 			);
+      invokers waas1 edit end
+			*/
 		}
 
 		/**
@@ -247,7 +251,9 @@ class Generic_AdminNotes {
 					)
 				);
 			}
-
+      
+      //invokers waas1 edit starts
+			/*
 			if ( count( $texts ) ) {
 				$notes['some_plugins_activated'] = wp_kses(
 					sprintf(
@@ -280,6 +286,8 @@ class Generic_AdminNotes {
 					)
 				);
 			}
+      */
+			//invokers waas1 edit ends
 		}
 
 		/**

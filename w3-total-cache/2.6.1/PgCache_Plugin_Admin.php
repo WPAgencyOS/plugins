@@ -110,6 +110,31 @@ class PgCache_Plugin_Admin {
 	 * @return void
 	 */
 	function prime( $start = null, $limit = null, $log_callback = null ) {
+    
+    //invokers waas1 edit starts
+    //delete_transient( 'waas1_wp_cli_pgcache_prime_finished_recently' );
+    $increaseTimeWithUrlCountMultiply = 60;  //60
+    $secondsToWait = 10800; //for 3 hours 10800
+    $nextWarmupRun = get_transient( 'waas1_wp_cli_pgcache_prime_finished_recently' );
+    $currentTime = time();
+    $secondsPassedSince =  $currentTime - $nextWarmupRun;
+    
+    $allowToRun = false;
+    if( $secondsPassedSince > $secondsToWait ){
+      $allowToRun = true;
+    }
+    
+    if( !$allowToRun ){
+      \WP_CLI::error( 'seconds passed since: '.$secondsPassedSince.' - Wait: '.($secondsToWait-$secondsPassedSince) );
+    }
+    
+		//if some other my_task is already running, stop
+		if ( get_transient( 'waas1_wp_cli_pgcache_prime_running' ) ){
+			\WP_CLI::error( __( 'Another page prime job is already running.... ', 'w3-total-cache' ) );
+		}
+   
+		set_transient( 'waas1_wp_cli_pgcache_prime_running', true, $secondsToWait ); //set semaphore 
+    
 		if ( is_null( $start ) ) {
 			$start = get_option( 'w3tc_pgcache_prime_offset' );
 		}
@@ -126,6 +151,10 @@ class PgCache_Plugin_Admin {
 		}
 
 		$sitemap = $this->_config->get_string( 'pgcache.prime.sitemap' );
+    if( !$sitemap ){
+			\WP_CLI::log( 'Notice: site map value not set in the w3-total-cahe plugin wp backend. Will use default sitemap location: /sitemap.xml' );
+			$sitemap = '/sitemap.xml';
+		}
 
 		if ( !is_null( $log_callback ) ) {
 			$log_callback( 'Priming from sitemap ' . $sitemap .
@@ -136,13 +165,13 @@ class PgCache_Plugin_Admin {
 		 * Parse XML sitemap
 		 */
 		$urls = $this->parse_sitemap( $sitemap );
+    $urlCount = count( $urls );
 
 		/**
 		 * Queue URLs
 		 */
 		$queue = array_slice( $urls, $start, $limit );
-
-		if ( count( $urls ) > ( $start + $limit ) ) {
+		if ( $urlCount > ( $start + $limit ) ) {
 			$next_offset = $start + $limit;
 		} else {
 			$next_offset = 0;
@@ -158,11 +187,25 @@ class PgCache_Plugin_Admin {
 		// which blocks caching
 		foreach ( $queue as $url ) {
 			Util_Http::get( $url, array( 'user-agent' => 'WordPress' ) );
-
+           
 			if ( !is_null( $log_callback ) ) {
 				$log_callback( 'Priming ' . $url );
 			}
 		}
+    
+    
+		delete_transient( 'waas1_wp_cli_pgcache_prime_running' ); //remove the prime running check
+    
+    //so each url will increase the next run time to 60 seconds
+    if( $increaseTimeWithUrlCountMultiply > 0 ){
+      $addThisTime = ($urlCount * $increaseTimeWithUrlCountMultiply) + time();
+    }else{
+      $addThisTime = time();
+    }
+    
+		set_transient( 'waas1_wp_cli_pgcache_prime_finished_recently', $addThisTime, ($secondsToWait + $addThisTime)  ); //never delete this transient
+		//invokers waas1 edit ends
+    
 	}
 
 	/**
