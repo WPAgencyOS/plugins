@@ -36,11 +36,6 @@ class PgCache_Plugin_Admin {
 					$this, 'w3tc_usage_statistics_summary_from_history' ), 10, 2 );
 		}
 
-		add_action( 'admin_print_scripts-performance_page_w3tc_pgcache', array(
-				'\W3TC\PgCache_Page',
-				'admin_print_scripts_w3tc_pgcache'
-			) );
-
 		// Cache groups.
 		add_action(
 			'w3tc_config_ui_save-w3tc_cachegroups',
@@ -115,20 +110,31 @@ class PgCache_Plugin_Admin {
 	 * @return void
 	 */
 	function prime( $start = null, $limit = null, $log_callback = null ) {
-		
-		//invokers waas1 path edit start's.
-		if ( get_transient( 'waas1_wp_cli_pgcache_prime_finished_recently' ) ){
-			\WP_CLI::error( __( 'Page prime job just recently finished running. Next run after 30mins.', 'w3-total-cache' ) );
-		}
-		// if some other my_task is already running, stop
+    
+    //invokers waas1 edit starts
+    //delete_transient( 'waas1_wp_cli_pgcache_prime_finished_recently' );
+    $increaseTimeWithUrlCountMultiply = 60;  //60
+    $secondsToWait = 10800; //for 3 hours 10800
+    $nextWarmupRun = get_transient( 'waas1_wp_cli_pgcache_prime_finished_recently' );
+    $currentTime = time();
+    $secondsPassedSince =  $currentTime - $nextWarmupRun;
+    
+    $allowToRun = false;
+    if( $secondsPassedSince > $secondsToWait ){
+      $allowToRun = true;
+    }
+    
+    if( !$allowToRun ){
+      \WP_CLI::error( 'seconds passed since: '.$secondsPassedSince.' - Wait: '.($secondsToWait-$secondsPassedSince) );
+    }
+    
+		//if some other my_task is already running, stop
 		if ( get_transient( 'waas1_wp_cli_pgcache_prime_running' ) ){
 			\WP_CLI::error( __( 'Another page prime job is already running.... ', 'w3-total-cache' ) );
 		}
-		// set semaphore for 3 hours
-		set_transient( 'waas1_wp_cli_pgcache_prime_running', true, 10800 );
-		//invokers waas1 path edit end's
-		
-		
+   
+		set_transient( 'waas1_wp_cli_pgcache_prime_running', true, $secondsToWait ); //set semaphore 
+    
 		if ( is_null( $start ) ) {
 			$start = get_option( 'w3tc_pgcache_prime_offset' );
 		}
@@ -145,14 +151,10 @@ class PgCache_Plugin_Admin {
 		}
 
 		$sitemap = $this->_config->get_string( 'pgcache.prime.sitemap' );
-		
-		//invokers waas1 path edit start's.
-		//this pach is applied for the cache prime/warmer to work. without value this will not prime the page cache
-		if( !$sitemap ){
+    if( !$sitemap ){
 			\WP_CLI::log( 'Notice: site map value not set in the w3-total-cahe plugin wp backend. Will use default sitemap location: /sitemap.xml' );
 			$sitemap = '/sitemap.xml';
 		}
-		//invokers waas1 path edit end's
 
 		if ( !is_null( $log_callback ) ) {
 			$log_callback( 'Priming from sitemap ' . $sitemap .
@@ -163,13 +165,13 @@ class PgCache_Plugin_Admin {
 		 * Parse XML sitemap
 		 */
 		$urls = $this->parse_sitemap( $sitemap );
+    $urlCount = count( $urls );
 
 		/**
 		 * Queue URLs
 		 */
 		$queue = array_slice( $urls, $start, $limit );
-
-		if ( count( $urls ) > ( $start + $limit ) ) {
+		if ( $urlCount > ( $start + $limit ) ) {
 			$next_offset = $start + $limit;
 		} else {
 			$next_offset = 0;
@@ -185,18 +187,25 @@ class PgCache_Plugin_Admin {
 		// which blocks caching
 		foreach ( $queue as $url ) {
 			Util_Http::get( $url, array( 'user-agent' => 'WordPress' ) );
-
+           
 			if ( !is_null( $log_callback ) ) {
 				$log_callback( 'Priming ' . $url );
 			}
 		}
-		
-		//invokers waas1 path edit start's.
-		//remove the prime running check
-		delete_transient( 'waas1_wp_cli_pgcache_prime_running' );
-		//set the new transiet to not to run the same job again for 3 hours
-		set_transient( 'waas1_wp_cli_pgcache_prime_finished_recently', true, 10800 ); //never delete this transient
-		//invokers waas1 path edit end's
+    
+    
+		delete_transient( 'waas1_wp_cli_pgcache_prime_running' ); //remove the prime running check
+    
+    //so each url will increase the next run time to 60 seconds
+    if( $increaseTimeWithUrlCountMultiply > 0 ){
+      $addThisTime = ($urlCount * $increaseTimeWithUrlCountMultiply) + time();
+    }else{
+      $addThisTime = time();
+    }
+    
+		set_transient( 'waas1_wp_cli_pgcache_prime_finished_recently', $addThisTime, ($secondsToWait + $addThisTime)  ); //never delete this transient
+		//invokers waas1 edit ends
+    
 	}
 
 	/**
@@ -315,8 +324,11 @@ class PgCache_Plugin_Admin {
 
 		if ( $c->get_string( 'pgcache.engine' ) == 'memcached' ) {
 			$memcached_servers = $c->get_array( 'pgcache.memcached.servers' );
+			$memcached_binary_protocol = $c->get_boolean( 'pgcache.memcached.binary_protocol' );
+			$memcached_username = $c->get_string( 'pgcache.memcached.username' );
+			$memcached_password = $c->get_string( 'pgcache.memcached.password' );
 
-			if ( !Util_Installed::is_memcache_available( $memcached_servers ) ) {
+			if ( !Util_Installed::is_memcache_available( $memcached_servers, $memcached_binary_protocol, $memcached_username, $memcached_password ) ) {
 				if ( !isset( $errors['memcache_not_responding.details'] ) )
 					$errors['memcache_not_responding.details'] = array();
 
